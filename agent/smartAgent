@@ -1,0 +1,344 @@
+ var http = require("http");
+var config = require("agent/config");
+var pubsub = require("pubsub");
+var directoryModule = require("agent/directoryDelegate");
+
+/**
+ * The SmartAgent wraps the details of the communication with external scriptr.io services
+ * services are exposed by a service directory of which URL is passed to the constructor
+ * the first time it is created (next time you instantiate the agent, do not pass the dto parameter
+ * unless you need to override the existing configuration)
+ * @class SmartAgent
+ * @constructor SmartAgent
+ * @param {Object} dto { // not mandatory but all its properties are when the dto is passed
+ * 	{String} serviceDirectory: the URL of the service directory
+ *	{String} tokenAtServiceDirectoy: the authentication token of the service directory
+ * }
+ */
+function SmartAgent(dto) {
+
+  var dirDto = null;
+  if (!dto) {
+    dirDto = this._loadConfig();   
+  }else {
+    
+    if (!dto.serviceDirectory) {
+
+      throw new {
+        errorCode: "Invalid_Parameter",
+        errorDetail: "SmartAgent: dto.serviceDirectory cannot be null or empty"
+      };
+    }
+
+    if (!dto.tokenAtServiceDirectoy) {
+
+      throw {
+        errorCode: "Invalid_Parameter",
+        errorDetail: "SmartAgent: dto.tokenAtServiceDirectoy cannot be null or empty"
+      };
+    }
+     
+    var dirDto = {
+      
+      serviceDirUrl: dto.serviceDirectory,
+      serviceDirToken: dto.tokenAtServiceDirectoy
+    }
+  }
+  
+  this.directory = new directoryModule.Directory(dirDto);
+  
+  if (!storage.global.agent) {    
+  	storage.global.agent = {};  
+  }
+  
+  if (!storage.global.agent.subscriptions) {
+   storage.global.agent.subscriptions = {};
+  }
+  
+   if (!storage.global.agent.providers) {
+    storage.global.agent.providers = {};
+  }
+  
+  if (!storage.global.agent.services) {
+    storage.global.agent.services = {};
+  }
+}
+
+/**
+ * Invoke a remote service known by the service directory
+ * This method can throw exceptions
+ * @method callService
+ * @param {Object} [dto]
+ * @param {String} [dto.serviceName]: the name of the remote service
+ * @param {Object} [dto.params]: the parameters expected by the remote service
+ * @param {String} [dto.providerName]: the name of the selected service provider
+ * @return {Object} the response sent by the remote service if any
+ */
+SmartAgent.prototype.callService = function(dto) {
+  
+  if (!dto || !dto.serviceName || !dto.params || !dto.providerName) {
+    
+  	throw {
+      
+      errorCode: "Invalid_Parameter",
+      errorDetail: "SmartAgent.callService : dto.serviceName, dto.params and dto.providerName cannot be  null or empty"
+    };
+  }
+  
+  var bodyStr = JSON.stringify(dto.params);
+  var provider = this.loadServiceProvider(dto.providerName);
+  if (!provider) {
+  	throw {
+      
+      errorCode: "Provider_Not_Found",
+      errorDetail: "SmartAgent.callService : could not find the required provider " + dto.providerName
+    };
+  }
+  
+  var callParam = {
+    
+    url: decodeURIComponent(provider.endPoint) + "/" + dto.serviceName,
+    headers : {
+      
+      "Content-Type": 'application/json',
+      "Content-Length": "" + bodyStr.length,
+      "Authorization": "Bearer : " +  provider.token
+    },
+    bodyString: bodyStr,
+  	method: "POST"
+  };
+  
+  console.log("Request " +  JSON.stringify(callParam));
+  var response = http.request(callParam);
+  return this._parseResponse(response);
+};
+
+/**
+ * 
+ * @param {Object} dto {
+ *	{String} remoteServiceName
+ *	{String} channel
+ * }
+ */
+SmartAgent.prototype.subscribe = function(dto) {
+  
+  if (!dto || !dto.channel || !dto.remoteServiceName) {
+    
+  	throw {
+      errorCode: "Invalid_Parameter",
+      errorDetail: "Agent.subscribe: dto, dto.channel, dto.remoteServiceName cannot be null or empty"
+    };
+  }
+  
+  if (!storage.global.agent.subscriptions[dto.channel]) {
+  	storage.global.agent.subscriptions[dto.channel] = [dto.remoteServiceName]; 
+  }else {
+    storage.global.agent.subscriptions[dto.channel].push(dto.remoteServiceName); 
+  }
+  
+  pubsub.subscribe(dto.channel, "agent/channelListener");
+};
+
+/**
+ * retrieve the list of service scripts that have a name matching 
+ * the content of the "filters" variable
+ * @method listServices 
+ * @return {Array} an array of service names
+ */
+SmartAgent.prototype.listServices = function(apsdb, filters) {
+
+  var response = apsdb.callApi("ListScripts", null, null);
+  if (response.metadata && response.metadata.status == "failure") {
+
+    throw {
+      "errorCode": response.metadata.errorCode,
+      "errorDetail": response.metadata.errorDetail
+    };
+  }
+
+  var scripts = response.result.scripts;
+  var subList = this._filterServiceList(scripts, filters);
+  return subList;
+};
+
+/**
+ * Add a new service provider to the service directory
+ * @method addServiceProvider 
+ * @param {Object} [providerDto]
+ * @param {String} [providerDto.name] : the name/id of the provider
+ * @param {String} [providerDto.enpoint] : the endpoint prefix of the provider
+ * @param {String} [providerDto.token] : valid token to invoke endpoints on the provider
+ * @param {Array} [providetDto.serviceTypes] : an array of strings specifying the service types (optional)
+ * @return {Array} an array of service names
+ */
+SmartAgent.prototype.addServiceProvider = function(providerDto) {
+
+  if (!providerDto || !providerDto.name || !providerDto.endPoint || !providerDto.token) {
+    
+  	throw {
+      errorCode: "Invalid_Parameter",
+      errorDetail: "Agent.addServiceProvidercribe: dto, dto.name, dto.endPoint. dto.token cannot be null or empty"
+    };
+  }
+   
+  storage.global.agent.providers[providerDto.name] = providerDto;
+  var serviceTypes = providerDto.serviceTypes.split(","); 
+  for (var i  = 0; i < serviceTypes.length; i++) {
+    
+    var serviceType = serviceTypes[i];
+    if (!storage.global.agent.services[serviceType]) {
+      storage.global.agent.services[serviceType] = providerDto.name;
+    }else {
+      
+       if (storage.global.agent.services[serviceType].indexOf(providerDto.name) == -1) {
+         providerDto.name.istorage.global.agent.services[serviceType] += ("," + providerDto.name);
+       }
+    }
+  }
+  
+  return "success";
+};
+
+/**
+ * @method registerToDirectory
+ */
+SmartAgent.prototype.registerToDirectory = function(serviceType) {
+  return this.directory.subscribe(serviceType);
+};
+
+/**
+ * Returns the list of registered service providers
+ * @method listServiceProviders
+ * @return {Array} an array of service providers {name, endPoint}
+ */
+SmartAgent.prototype.listServiceProviders = function() {
+  return storage.global.agent.providers;
+};
+
+/**
+ * @method listProvidersForService
+ * @return {String} comma separated list of service proviers if any
+ */
+SmartAgent.prototype.listProvidersForService = function(serviceType) { 
+  
+  var providerNameStr = storage.global.agent.services[serviceType];
+  var providerNames = providerNameStr ? providerNameStr.split(",") : [];
+  var providers = [];
+  if (providerNames.length > 0) {
+    
+    for (var i = 0; i < providerNames.length; i++) {
+    
+      var provider = this.loadServiceProvider(providerNames[i])
+      providers.push(provider);
+    }
+
+    return providers;
+  }else {
+    
+    providers = this.directory.listServiceProviders(serviceType);
+    if (providers) {
+     
+      for (var j = 0; j < providers.length; j++) {
+        this.addServiceProvider(providers[j]);
+      }
+    }
+    
+    return providers;
+  }  
+};
+
+/**
+ * @method loadServiceProvider
+ * @return {Object} data related to the provider
+ */
+SmartAgent.prototype.loadServiceProvider = function(providerName) { 
+  return storage.global.agent.providers[providerName];
+};
+
+/*
+ * Set serviceDirUrl and serviceDirToken properties to the corresponding
+ * values specified in the agent/config file
+ */
+SmartAgent.prototype._loadConfig = function() { 
+  
+  return {
+   
+    serviceDirUrl: config.serviceDirectory.url,
+    serviceDirToken: config.serviceDirectory.token
+  }
+};
+
+/*
+ * Parse the response resulting from the request sent to the remote service
+ */
+SmartAgent.prototype._parseResponse = function(resp) {
+  console.log(JSON.stringify(resp))
+  
+  var body = resp.body ? JSON.parse(resp.body) : {};
+  if (resp.status < "200" || resp.status >= "300") {
+    
+    throw {
+    	errorCode: "Service_call_Failure",
+      	errorDetail: "Remote service failed (" +  resp.status + ") - " +  resp.body
+    };
+  }
+  
+  
+  if (body.response.status == "failure") {
+    
+    throw {
+      
+    	errorCode: "Service_call_Failure",
+      	errorDetail: "Failed to call remote service (" +  body.response.status + ") - " +  body.response.errorDetail
+    };
+  }
+  
+  if (body.response.result.erroCode) {
+    
+    throw {
+      
+    	errorCode: body.response.result.errorCode,
+      	errorDetail: body.response.errorDetail
+    };
+  }
+  
+  return body.response.result;
+};
+
+/*
+ * filter the list of provided scripts in the current account according to the provided filters
+ * all filters have to be found in the name of the script.
+ * this method can throw exceptions
+ * @function 
+ * @param {Array} scriptList : the list of scripts returned by a call to the ListScripts API
+ * @param {Array} filters : an array of strings that should be found in the names of the scripts list
+ * @return {Array} an array of script path + names matching the filters
+ */
+SmartAgent.prototype._filterServiceList = function(scriptList, filters) {
+  
+  var subList = [];
+  for (var i = 0; i < scriptList.length; i++) {
+    
+    if (this._isInFilter(scriptList[i].name, filters)) {
+		subList.push(scriptList[i].name);
+    }    
+  }
+  
+  return subList;
+};
+
+/*
+ * @function _isInFilter
+ * @param {String} scriptName : the path +  name of a script
+ * @param {Array} filters : an array of strings that should be found in the names of the scripts list
+ * @return {Boolean} true if scriptName contains all the filters, false otherwise
+ */
+SmartAgent.prototype._isInFilter = function(scriptName, filters) {
+ 
+  var found = false;
+  for (var i = 0; i < filters.length && !found; i++) {    
+    found = scriptName.indexOf(filters[i]) > -1 ? true : false;
+  }
+  
+  return found;
+};

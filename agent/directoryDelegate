@@ -1,0 +1,106 @@
+ var config = require("agent/config");
+var http = require("http");
+
+function Directory(dto) {
+
+  this.serviceDirUrl = dto.serviceDirUrl,
+  this.serviceDirToken = dto.serviceDirToken
+}
+
+/**
+ * Subscribe self to the main service directory
+ * @subscribeToDirectory
+ */
+Directory.prototype.subscribe = function(serviceType) {
+  
+   var providerDto = {
+  	
+     name: encodeURIComponent(config.agentName),
+     endPoint: encodeURIComponent(config.agentEndpoint),
+     token: config.agentToken,
+     serviceTypes: encodeURIComponent(serviceType)
+  };
+  
+  var bodyStr = JSON.stringify(providerDto);
+  var callParam = {
+    
+    url: this.serviceDirUrl + "/agent/api/addServiceProvider",
+    headers : {
+      
+      "Content-Type": 'application/json',
+      "Content-Length": "" + bodyStr.length,
+      "Authorization": "Bearer : " +  this.serviceDirToken
+    },
+    bodyString: bodyStr,
+  	method: "POST"
+  };
+  console.log("Request " + JSON.stringify(callParam));
+  var response = http.request(callParam);
+  return this._parseResponse(response);
+};
+
+/**
+ * @listServiceProviders
+ */
+Directory.prototype.listServiceProviders = function(serviceType) {
+  
+   var providerDto = {
+  	
+     name: encodeURIComponent(config.agentName),
+     endPoint: encodeURIComponent(config.agentEndpoint),
+     token: config.agentToken,
+     serviceTypes: encodeURIComponent(serviceType)
+  };
+  
+  var callParam = {
+    
+    url: this.serviceDirUrl + "/agent/api/listServiceProviders",
+    headers : {
+      "Authorization": "Bearer : " +  this.serviceDirToken
+    },
+    params: {
+      serviceType: serviceType
+    },
+  	method: "GET"
+  };
+  console.log("Request " + JSON.stringify(callParam));
+  var response = http.request(callParam);
+  return this._parseResponse(response);
+};
+
+/*
+ * Parse the response resulting from the request sent to the remote service
+ */
+Directory.prototype._parseResponse = function(resp) {
+  
+  console.log(JSON.stringify(resp));  
+  var body = resp.body ? JSON.parse(resp.body) : {};
+  if (resp.status < "200" || resp.status >= "300") {
+    
+    throw {
+    	errorCode: "Service_call_Failure",
+      	errorDetail: "Remote service failed (" +  resp.status + ") - " +  resp.body
+    };
+  }
+  
+  
+  if (body.response.status == "failure") {
+    
+    throw {
+      
+    	errorCode: "Service_call_Failure",
+      	errorDetail: "Failed to call remote service (" +  body.response.status + ") - " +  body.response.errorDetail
+    };
+  }
+  
+  if (body.response.result.erroCode) {
+    
+    throw {
+      
+    	errorCode: body.response.result.errorCode,
+      	errorDetail: body.response.errorDetail
+    };
+  }
+  
+  return body.response.result;
+};

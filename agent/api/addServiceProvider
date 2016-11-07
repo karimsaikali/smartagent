@@ -1,0 +1,24 @@
+ /**
+ * This API is exposed to external agents running on scriptr.io enabled nodes
+ * it allows those agents to register themselves as service providers
+ * A service is a script placed in a "something/api/somethingElse" folder
+ * @api addServiceProvider
+ */
+try {
+  
+  var smartAgent = require("agent/smartAgent");
+  var agent = new smartAgent.SmartAgent();
+  var providerDto = request.body;
+  if (!providerDto) {
+
+    providerDto = {};
+    providerDto.name = request.parameters.name;
+    providerDto.endPoint = request.parameters.endPoint; 
+    providerDto.token =  request.parameters.token;
+    providerDto.serviceTypes = request.parameters.serviceTypes;
+  }
+
+  return agent.addServiceProvider(providerDto);
+}catch(exception) {
+  return exception;
+}

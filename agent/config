@@ -1,0 +1,10 @@
+ var serviceDirectory = {
+  
+  url: "https://api.scriptr.io",
+  token: ""
+};
+
+// this device
+agentName = "some_name";
+agentEndpoint = "https://api.scriptrapps.io";
+agentToken = ""; // auth token of the current device		

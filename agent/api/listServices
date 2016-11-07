@@ -1,0 +1,12 @@
+ /**
+ * This API is exposed to external agents running on scriptr.io enabled nodes
+ * It returns the list of services available on the current node
+ * A service is a script placed in a "something/api/somethingElse" folder
+ * @api listServices
+ */
+
+var smartAgent = require("agent/smartAgent");
+var agent = new smartAgent.SmartAgent();
+var filterParam = request.parameters.filter;
+var filter = filterParam ? filterParam + "/api" : "/api";
+return agent.listServices(apsdb, [filter]);
